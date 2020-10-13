@@ -6,12 +6,18 @@ import { bnToHex } from '../lib/util'
 import fetchWithTimeout from '../lib/fetch-with-timeout'
 
 import {
-  ROPSTEN,
-  RINKEBY,
-  KOVAN,
+  CHAIN_ID_TO_NETWORK_ID_MAP,
+  CHAIN_ID_TO_TYPE_MAP,
   GOERLI,
+  GOERLI_CHAIN_ID,
+  KOVAN,
+  KOVAN_CHAIN_ID,
   MAINNET,
-  NETWORK_TYPE_TO_ID_MAP,
+  MAINNET_CHAIN_ID,
+  RINKEBY,
+  RINKEBY_CHAIN_ID,
+  ROPSTEN,
+  ROPSTEN_CHAIN_ID,
 } from './network/enums'
 
 const fetch = fetchWithTimeout({
@@ -29,7 +35,6 @@ export default class IncomingTransactionsController {
     this.blockTracker = blockTracker
     this.networkController = networkController
     this.preferencesController = preferencesController
-    this.getCurrentNetwork = () => networkController.getProviderConfig().type
 
     this._onLatestBlock = async (newBlockNumberHex) => {
       const selectedAddress = this.preferencesController.getSelectedAddress()
@@ -43,11 +48,11 @@ export default class IncomingTransactionsController {
     const initState = {
       incomingTransactions: {},
       incomingTxLastFetchedBlocksByNetwork: {
-        [ROPSTEN]: null,
-        [RINKEBY]: null,
-        [KOVAN]: null,
         [GOERLI]: null,
+        [KOVAN]: null,
         [MAINNET]: null,
+        [RINKEBY]: null,
+        [ROPSTEN]: null,
       }, ...opts.initState,
     }
     this.store = new ObservableStore(initState)
@@ -81,11 +86,10 @@ export default class IncomingTransactionsController {
       })
     }))
 
-    this.networkController.on('networkDidChange', async (newType) => {
+    this.networkController.on('networkDidChange', async () => {
       const address = this.preferencesController.getSelectedAddress()
       await this._update({
         address,
-        networkType: newType,
       })
     })
   }
@@ -106,29 +110,29 @@ export default class IncomingTransactionsController {
     this.blockTracker.removeListener('latest', this._onLatestBlock)
   }
 
-  async _update ({ address, newBlockNumberDec, networkType } = {}) {
+  async _update ({ address, newBlockNumberDec } = {}) {
     try {
-      const dataForUpdate = await this._getDataForUpdate({ address, newBlockNumberDec, networkType })
+      const dataForUpdate = await this._getDataForUpdate({ address, newBlockNumberDec })
       await this._updateStateWithNewTxData(dataForUpdate)
     } catch (err) {
       log.error(err)
     }
   }
 
-  async _getDataForUpdate ({ address, newBlockNumberDec, networkType } = {}) {
+  async _getDataForUpdate ({ address, newBlockNumberDec } = {}) {
     const {
       incomingTransactions: currentIncomingTxs,
       incomingTxLastFetchedBlocksByNetwork: currentBlocksByNetwork,
     } = this.store.getState()
 
-    const network = networkType || this.getCurrentNetwork()
-    const lastFetchBlockByCurrentNetwork = currentBlocksByNetwork[network]
+    const chainId = this.networkController.getCurrentChainId()
+    const lastFetchBlockByCurrentNetwork = currentBlocksByNetwork[CHAIN_ID_TO_TYPE_MAP[chainId]]
     let blockToFetchFrom = lastFetchBlockByCurrentNetwork || newBlockNumberDec
     if (blockToFetchFrom === undefined) {
       blockToFetchFrom = parseInt(this.blockTracker.getCurrentBlock(), 16)
     }
 
-    const { latestIncomingTxBlockNumber, txs: newTxs } = await this._fetchAll(address, blockToFetchFrom, network)
+    const { latestIncomingTxBlockNumber, txs: newTxs } = await this._fetchAll(address, blockToFetchFrom, chainId)
 
     return {
       latestIncomingTxBlockNumber,
@@ -136,7 +140,7 @@ export default class IncomingTransactionsController {
       currentIncomingTxs,
       currentBlocksByNetwork,
       fetchedBlockNumber: blockToFetchFrom,
-      network,
+      chainId,
     }
   }
 
@@ -146,7 +150,7 @@ export default class IncomingTransactionsController {
     currentIncomingTxs,
     currentBlocksByNetwork,
     fetchedBlockNumber,
-    network,
+    chainId,
   }) {
     const newLatestBlockHashByNetwork = latestIncomingTxBlockNumber
       ? parseInt(latestIncomingTxBlockNumber, 10) + 1
@@ -161,28 +165,26 @@ export default class IncomingTransactionsController {
     this.store.updateState({
       incomingTxLastFetchedBlocksByNetwork: {
         ...currentBlocksByNetwork,
-        [network]: newLatestBlockHashByNetwork,
+        [CHAIN_ID_TO_TYPE_MAP[chainId]]: newLatestBlockHashByNetwork,
       },
       incomingTransactions: newIncomingTransactions,
     })
   }
 
-  async _fetchAll (address, fromBlock, networkType) {
-    const fetchedTxResponse = await this._fetchTxs(address, fromBlock, networkType)
+  async _fetchAll (address, fromBlock, chainId) {
+    const fetchedTxResponse = await this._fetchTxs(address, fromBlock, chainId)
     return this._processTxFetchResponse(fetchedTxResponse)
   }
 
-  async _fetchTxs (address, fromBlock, networkType) {
+  async _fetchTxs (address, fromBlock, chainId) {
     let etherscanSubdomain = 'api'
-    const currentNetworkID = NETWORK_TYPE_TO_ID_MAP[networkType]?.networkId
 
-    if (!currentNetworkID) {
+    if ([ROPSTEN_CHAIN_ID, RINKEBY_CHAIN_ID, GOERLI_CHAIN_ID, KOVAN_CHAIN_ID].includes(chainId)) {
+      etherscanSubdomain = `api-${CHAIN_ID_TO_TYPE_MAP[chainId]}`
+    } else if (chainId !== MAINNET_CHAIN_ID) {
       return {}
     }
 
-    if (networkType !== MAINNET) {
-      etherscanSubdomain = `api-${networkType}`
-    }
     const apiUrl = `https://${etherscanSubdomain}.etherscan.io`
     let url = `${apiUrl}/api?module=account&action=txlist&address=${address}&tag=latest&page=1`
 
@@ -195,17 +197,17 @@ export default class IncomingTransactionsController {
     return {
       ...parsedResponse,
       address,
-      currentNetworkID,
+      chainId,
     }
   }
 
-  _processTxFetchResponse ({ status, result = [], address, currentNetworkID }) {
+  _processTxFetchResponse ({ status, result = [], address, chainId }) {
     if (status === '1' && Array.isArray(result) && result.length > 0) {
       const remoteTxList = {}
       const remoteTxs = []
       result.forEach((tx) => {
         if (!remoteTxList[tx.hash]) {
-          remoteTxs.push(this._normalizeTxFromEtherscan(tx, currentNetworkID))
+          remoteTxs.push(this._normalizeTxFromEtherscan(tx, chainId))
           remoteTxList[tx.hash] = 1
         }
       })
@@ -234,13 +236,13 @@ export default class IncomingTransactionsController {
     }
   }
 
-  _normalizeTxFromEtherscan (txMeta, currentNetworkID) {
+  _normalizeTxFromEtherscan (txMeta, chainId) {
     const time = parseInt(txMeta.timeStamp, 10) * 1000
     const status = txMeta.isError === '0' ? 'confirmed' : 'failed'
     return {
       blockNumber: txMeta.blockNumber,
       id: createId(),
-      metamaskNetworkId: currentNetworkID,
+      metamaskNetworkId: CHAIN_ID_TO_NETWORK_ID_MAP[chainId],
       status,
       time,
       txParams: {
