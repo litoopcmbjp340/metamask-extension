@@ -177,13 +177,13 @@ export default class IncomingTransactionsController {
   }
 
   async _fetchTxs (address, fromBlock, chainId) {
-    let etherscanSubdomain = 'api'
-
-    if ([ROPSTEN_CHAIN_ID, RINKEBY_CHAIN_ID, GOERLI_CHAIN_ID, KOVAN_CHAIN_ID].includes(chainId)) {
-      etherscanSubdomain = `api-${CHAIN_ID_TO_TYPE_MAP[chainId]}`
-    } else if (chainId !== MAINNET_CHAIN_ID) {
+    if (!CHAIN_ID_TO_TYPE_MAP[chainId]) {
       return {}
     }
+
+    const etherscanSubdomain = chainId === MAINNET_CHAIN_ID
+      ? 'api'
+      : `api-${CHAIN_ID_TO_TYPE_MAP[chainId]}`
 
     const apiUrl = `https://${etherscanSubdomain}.etherscan.io`
     let url = `${apiUrl}/api?module=account&action=txlist&address=${address}&tag=latest&page=1`
