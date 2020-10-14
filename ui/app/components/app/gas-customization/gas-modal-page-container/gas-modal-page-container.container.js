@@ -75,6 +75,8 @@ const mapStateToProps = (state, ownProps) => {
     customTotalSupplement = '',
     extraInfoRow = null,
     useFastestButtons = false,
+    noFetchOnMount = false,
+    hideAdvancedTimeEstimates = false,
   } = modalProps || {}
   const { transaction = {} } = ownProps
   const selectedTransaction = isSwap
@@ -202,6 +204,8 @@ const mapStateToProps = (state, ownProps) => {
     conversionRate,
     value,
     customTotalSupplement,
+    noFetchOnMount,
+    hideAdvancedTimeEstimates,
   }
 }
 

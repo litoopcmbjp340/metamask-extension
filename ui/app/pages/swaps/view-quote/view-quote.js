@@ -393,7 +393,8 @@ export default function ViewQuote () {
         }
         : null
     ),
-    useFastestButtons: true,
+    noFetchOnMount: true,
+    hideAdvancedTimeEstimates: true,
   }))
 
   const tokenApprovalTextComponent = (

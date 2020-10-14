@@ -170,6 +170,8 @@ describe('gas-modal-page-container container', function () {
           id: 34,
         },
         value: '0x640000000000000',
+        hideAdvancedTimeEstimates: false,
+        noFetchOnMount: false,
       }
       const baseMockOwnProps = { transaction: { id: 34 } }
       const tests = [

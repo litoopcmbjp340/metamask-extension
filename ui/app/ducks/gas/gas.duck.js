@@ -172,6 +172,18 @@ export function gasEstimatesLoadingFinished () {
   }
 }
 
+async function queryMetaSwapsGasPriceApi () {
+  const url = 'https://api.metaswap.codefi.network/gasPrices'
+  return await window.fetch(url, {
+    'headers': {},
+    'referrer': 'https://api.metaswap.codefi.network/',
+    'referrerPolicy': 'no-referrer-when-downgrade',
+    'body': null,
+    'method': 'GET',
+    'mode': 'cors',
+  })
+}
+
 async function queryEthGasStationBasic () {
   const apiKey = process.env.ETH_GAS_STATION_API_KEY ? `?api-key=${process.env.ETH_GAS_STATION_API_KEY}` : ''
   const url = `https://ethgasstation.info/json/ethgasAPI.json${apiKey}`
@@ -449,6 +461,52 @@ export function fetchGasEstimates (blockTime) {
       dispatch(gasEstimatesLoadingFinished())
     })
   }
+}
+
+export function fetchMetaSwapsGasPriceEstimates () {
+  return async (dispatch, getState) => {
+    const { basicPriceAndTimeEstimatesLastRetrieved } = getState().gas
+    const timeLastRetrieved = basicPriceAndTimeEstimatesLastRetrieved || loadLocalStorageData('METASWAP_GAS_PRICE_ESTIMATES_LAST_RETRIEVED') || 0
+
+    dispatch(basicGasEstimatesLoadingStarted())
+
+    let basicEstimates
+    if (Date.now() - timeLastRetrieved > 30000) {
+      basicEstimates = await fetchExternalMetaSwapGasPriceEstimates(dispatch)
+    } else {
+      const cachedBasicEstimates = loadLocalStorageData('METASWAP_GAS_PRICE_ESTIMATES')
+      basicEstimates = cachedBasicEstimates || await fetchExternalMetaSwapGasPriceEstimates(dispatch)
+    }
+
+    dispatch(setBasicGasEstimateData(basicEstimates))
+    dispatch(basicGasEstimatesLoadingFinished())
+    return basicEstimates
+  }
+}
+
+async function fetchExternalMetaSwapGasPriceEstimates (dispatch) {
+  const response = await queryMetaSwapsGasPriceApi()
+
+  const {
+    SafeGasPrice: safeLow,
+    ProposeGasPrice: average,
+    FastGasPrice: fast,
+    LastBlock: blockNum,
+  } = await response.json()
+
+  const basicEstimates = {
+    safeLow,
+    average,
+    blockNum,
+    fast,
+  }
+
+  const timeRetrieved = Date.now()
+  saveLocalStorageData(basicEstimates, 'METASWAP_GAS_PRICE_ESTIMATES')
+  saveLocalStorageData(timeRetrieved, 'METASWAP_GAS_PRICE_ESTIMATES_LAST_RETRIEVED')
+  dispatch(setBasicApiEstimatesLastRetrieved(timeRetrieved))
+
+  return basicEstimates
 }
 
 export function setCustomGasPriceForRetry (newPrice) {
